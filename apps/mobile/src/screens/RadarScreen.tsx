@@ -5,18 +5,58 @@ import {
   StyleSheet,
   Animated,
   TouchableOpacity,
-  Alert
+  Alert,
+  FlatList
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import { useBluetooth } from '../hooks/useBluetooth';
+import { useSocket } from '../hooks/useSocket';
+import { apiService } from '../services/ApiService';
 
 const RadarScreen = () => {
-  const [isScanning, setIsScanning] = useState(false);
-  const [nearbyCount, setNearbyCount] = useState(0);
   const [pulseAnim] = useState(new Animated.Value(1));
+  const [currentUserId] = useState(`user_${Math.random().toString(36).substr(2, 9)}`); // 仮のユーザーID
+  
+  const {
+    isScanning,
+    detectedDevices,
+    nearbyCount,
+    isBluetoothAvailable,
+    hasPermission,
+    currentLocation,
+    startScanning,
+    stopScanning,
+    requestPermissions,
+  } = useBluetooth();
 
+  const {
+    isConnected: isSocketConnected,
+    connect: connectSocket,
+    disconnect: disconnectSocket,
+    sendProximityDetection,
+    reconnect: reconnectSocket,
+  } = useSocket();
+
+  // Socket接続を初期化
   useEffect(() => {
-    // レーダーのパルスアニメーション
+    const initializeConnection = async () => {
+      try {
+        await connectSocket(currentUserId);
+      } catch (error) {
+        console.error('Socket connection failed:', error);
+      }
+    };
+
+    initializeConnection();
+
+    return () => {
+      disconnectSocket();
+    };
+  }, [currentUserId, connectSocket, disconnectSocket]);
+
+  // レーダーのパルスアニメーション
+  useEffect(() => {
     const startPulse = () => {
       Animated.loop(
         Animated.sequence([
@@ -39,21 +79,96 @@ const RadarScreen = () => {
     }
   }, [isScanning, pulseAnim]);
 
-  const toggleScanning = () => {
+  // 検出されたデバイスをサーバーに送信
+  useEffect(() => {
+    if (detectedDevices.length > 0 && currentLocation && isSocketConnected) {
+      const nearbyUserIds = detectedDevices.map(device => device.id);
+      
+      // APIサービス経由でサーバーに送信
+      const sendToServer = async () => {
+        try {
+          // 位置情報を更新
+          await apiService.updateLocation(currentUserId, {
+            latitude: currentLocation.coords.latitude,
+            longitude: currentLocation.coords.longitude,
+            address: '現在位置',
+          });
+
+          // 近接検知データを送信
+          await apiService.sendProximityData(currentUserId, {
+            deviceId: currentUserId,
+            location: {
+              latitude: currentLocation.coords.latitude,
+              longitude: currentLocation.coords.longitude,
+            },
+            timestamp: new Date(),
+          });
+
+          // Socket経由でリアルタイム通知
+          sendProximityDetection({
+            userId: currentUserId,
+            nearbyUsers: nearbyUserIds,
+            location: {
+              latitude: currentLocation.coords.latitude,
+              longitude: currentLocation.coords.longitude,
+            },
+          });
+
+        } catch (error) {
+          console.error('Failed to send proximity data:', error);
+        }
+      };
+
+      sendToServer();
+    }
+  }, [detectedDevices, currentLocation, isSocketConnected, currentUserId, sendProximityDetection]);
+
+  const toggleScanning = async () => {
     if (!isScanning) {
-      setIsScanning(true);
-      Alert.alert(
-        'すれ違い検知開始',
-        'バックグラウンドで近くの人を検知します。「ピロン♪」が鳴ったらすれ違いです！',
-        [{ text: 'OK' }]
-      );
+      // 権限チェック
+      if (!hasPermission) {
+        const granted = await requestPermissions();
+        if (!granted) {
+          Alert.alert(
+            '権限が必要です',
+            'Bluetoothと位置情報の権限が必要です。設定から許可してください。'
+          );
+          return;
+        }
+      }
+
+      // Bluetooth利用可能性チェック
+      if (!isBluetoothAvailable) {
+        Alert.alert(
+          'Bluetoothが無効です',
+          'Bluetoothを有効にしてからお試しください。'
+        );
+        return;
+      }
+
+      const success = await startScanning({
+        rssiThreshold: -60, // 60dBm以内
+        scanDuration: 5000, // 5秒間隔
+      });
+
+      if (success) {
+        Alert.alert(
+          'すれ違い検知開始',
+          'バックグラウンドで近くの人を検知します。「ピロン♪」が鳴ったらすれ違いです！',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'エラー',
+          'スキャンの開始に失敗しました。'
+        );
+      }
     } else {
-      setIsScanning(false);
+      stopScanning();
     }
   };
 
   const simulateEncounter = () => {
-    setNearbyCount(prev => prev + 1);
     Alert.alert(
       'ピロン♪',
       'すれ違いました！後で履歴を確認してみてください。',
@@ -77,6 +192,14 @@ const RadarScreen = () => {
           <Text style={[styles.statusText, { color: isScanning ? "#4CAF50" : "#666" }]}>
             {isScanning ? "検知中" : "停止中"}
           </Text>
+          <Ionicons 
+            name={isSocketConnected ? "wifi" : "wifi-outline"} 
+            size={20} 
+            color={isSocketConnected ? "#4CAF50" : "#FF6B6B"} 
+          />
+          <Text style={[styles.statusText, { color: isSocketConnected ? "#4CAF50" : "#FF6B6B" }]}>
+            {isSocketConnected ? "接続中" : "未接続"}
+          </Text>
         </View>
       </View>
 
@@ -99,6 +222,17 @@ const RadarScreen = () => {
             <Text style={styles.countText}>{nearbyCount}</Text>
           </View>
         )}
+
+        {/* 検出されたデバイス一覧 */}
+        {detectedDevices.length > 0 && (
+          <View style={styles.deviceList}>
+            {detectedDevices.slice(0, 3).map((device, index) => (
+              <View key={device.id} style={styles.deviceDot}>
+                <Text style={styles.deviceText}>{device.name?.substring(0, 1) || '?'}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </View>
 
       {/* 状態テキスト */}
@@ -110,7 +244,22 @@ const RadarScreen = () => {
         </Text>
         {nearbyCount > 0 && (
           <Text style={styles.encounterText}>
-            今日のすれ違い: {nearbyCount}人
+            今検知中: {nearbyCount}人
+          </Text>
+        )}
+        {currentLocation && (
+          <Text style={styles.locationText}>
+            📍 {currentLocation.coords.latitude.toFixed(4)}, {currentLocation.coords.longitude.toFixed(4)}
+          </Text>
+        )}
+        {!isBluetoothAvailable && (
+          <Text style={styles.warningText}>
+            ⚠️ Bluetoothが無効です
+          </Text>
+        )}
+        {!hasPermission && (
+          <Text style={styles.warningText}>
+            ⚠️ 権限が必要です
           </Text>
         )}
       </View>
@@ -131,13 +280,24 @@ const RadarScreen = () => {
           </Text>
         </TouchableOpacity>
 
-        {/* デバッグ用 */}
+        {/* デバッグ用ボタン */}
         <TouchableOpacity 
           style={styles.debugButton}
           onPress={simulateEncounter}
         >
           <Text style={styles.debugButtonText}>すれ違いをシミュレート</Text>
         </TouchableOpacity>
+
+        {/* Socket再接続ボタン */}
+        {!isSocketConnected && (
+          <TouchableOpacity 
+            style={styles.reconnectButton}
+            onPress={() => reconnectSocket(currentUserId)}
+          >
+            <Ionicons name="refresh" size={16} color="#4CAF50" />
+            <Text style={styles.reconnectButtonText}>サーバーに再接続</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -257,6 +417,59 @@ const styles = StyleSheet.create({
   debugButtonText: {
     color: '#ccc',
     fontSize: 14,
+  },
+  deviceList: {
+    position: 'absolute',
+    top: -120,
+    left: -120,
+    right: -120,
+    bottom: -120,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deviceDot: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#FF6B6B',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  deviceText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  locationText: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  warningText: {
+    fontSize: 12,
+    color: '#FF6B6B',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  reconnectButton: {
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#4CAF50',
+    gap: 6,
+  },
+  reconnectButtonText: {
+    color: '#4CAF50',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
 

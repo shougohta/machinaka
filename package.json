@@ -23,5 +23,9 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "react-native-screens": "~4.11.1",
+    "react-native-svg": "^15.11.2"
   }
 }
