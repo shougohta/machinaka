@@ -1,0 +1,98 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build outputs
+dist/
+build/
+*.tgz
+*.tar.gz
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# ESLint cache
+.eslintcache
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# React Native
+# Metro
+.metro-health-check*
+
+# Xcode
+*.xcworkspace
+!default.xcworkspace
+*.xcuserdata
+xcshareddata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Android
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+
+# iOS
+ios/Pods/
+*.mobileprovision
+*.cert
+
+# CocoaPods
+Pods/
+
+# Expo
+.expo/
+web-build/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+*.swp
+*.swo
+
+# Logs
+logs
+*.log
+
+# Database
+*.sqlite
+*.db
+
+# IDE
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Temporary files
+tmp/
+temp/

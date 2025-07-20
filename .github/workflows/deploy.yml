@@ -1,0 +1,60 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --workspace=packages/backend
+
+      - name: Build backend
+        run: npm run build --workspace=packages/backend
+
+      - name: Deploy to Railway
+        uses: railway-org/github-action@v1
+        with:
+          api-token: ${{ secrets.RAILWAY_TOKEN }}
+          project-id: ${{ secrets.RAILWAY_PROJECT_ID }}
+          service: backend
+
+  build-mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Setup Expo CLI
+        run: npm install -g @expo/cli
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --workspace=apps/mobile
+
+      - name: Build for production
+        run: |
+          cd apps/mobile
+          expo build:android --type apk
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
